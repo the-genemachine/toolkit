@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -173,4 +174,13 @@ func (t *Tools) Slugify(s string) (string, error) {
 		return "", errors.New("slug is empty")
 	}
 	return slug, nil
+}
+
+// DownLoadStaticFile downloads a static file and does not display it in the browser by setting the Content-Disposition
+func (t *Tools) DownloadStaticFile(w http.ResponseWriter, r *http.Request, p, file, displayName string) {
+	fp := path.Join(p, file)
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", displayName))
+
+	http.ServeFile(w, r, fp)
+
 }
