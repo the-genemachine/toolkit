@@ -1,6 +1,9 @@
 package toolkit
 
 import (
+	"bytes"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"image"
 	"image/png"
@@ -206,6 +209,110 @@ func TestTools_DownloadStaticFile(t *testing.T) {
 	_, err := ioutil.ReadAll(res.Body)
 	if err != nil {
 		t.Error(err)
+	}
+
+}
+
+var jsonTests = []struct {
+	name          string
+	json          string
+	errorExpected bool
+	maxSize       int
+	allowUnknown  bool
+}{
+	{name: "valid json", json: `{"foo":"bar"}`, errorExpected: false, maxSize: 1024, allowUnknown: false},
+	{name: "invalid json : badly formatted", json: `{"foo":}`, errorExpected: true, maxSize: 1024, allowUnknown: false},
+	{name: "invalid json : incorrect type", json: `{"foo": 1}`, errorExpected: true, maxSize: 1024, allowUnknown: false},
+	{name: "invalid json : two json files", json: `{"foo": "1"}{"alpha" : "beta"}`, errorExpected: true, maxSize: 1024, allowUnknown: false},
+	{name: "invalid json : empty body", json: ``, errorExpected: true, maxSize: 1024, allowUnknown: false},
+	{name: "invalid json : syntax error", json: `{"foo" : 1"} `, errorExpected: true, maxSize: 1024, allowUnknown: false},
+	{name: "invalid json : unknown field", json: `{"fooo" : 1"} `, errorExpected: true, maxSize: 1024, allowUnknown: false},
+	{name: "invalid json : allow unknown fields", json: `{"fooo" : "1"} `, errorExpected: false, maxSize: 1024, allowUnknown: true},
+	{name: "invalid json : missing field", json: `{foo : "1"} `, errorExpected: true, maxSize: 1024, allowUnknown: true},
+	{name: "invalid json : file too large", json: `{foo : "bar"} `, errorExpected: true, maxSize: 3, allowUnknown: true},
+	{name: "invalid json : not json", json: `Hello World `, errorExpected: true, maxSize: 1024, allowUnknown: true},
+}
+
+// write a table test
+func TestTools_ReadJSONFile(t *testing.T) {
+	var testTool Tools
+
+	for _, e := range jsonTests {
+		testTool.MaxJSONSize = e.maxSize
+
+		testTool.AllowUnknownFields = e.allowUnknown
+
+		var decodedJSON struct {
+			Foo string `json:"foo"`
+		}
+
+		req, err := http.NewRequest("POST", "/", bytes.NewReader([]byte(e.json)))
+		if err != nil {
+			t.Log("Error : ", err)
+		}
+
+		// create a new recorder
+		rr := httptest.NewRecorder()
+
+		// call the function
+		err = testTool.ReadJSONFile(rr, req, &decodedJSON)
+
+		if e.errorExpected && err == nil {
+			t.Errorf("%s : error expected but not received", e.name)
+		}
+
+		if !e.errorExpected && err != nil {
+			t.Errorf("%s : error received but not expected : %s", e.name, err.Error())
+		}
+
+		req.Body.Close()
+	}
+
+}
+
+func TestTools_WriteJSONFile(t *testing.T) {
+	var testTools Tools
+
+	rr := httptest.NewRecorder()
+
+	payload := JSONResponse{
+		Error:   false,
+		Message: "foo",
+	}
+
+	headers := make(http.Header)
+	headers.Add("FOO", "BAR")
+
+	err := testTools.WriteJSON(rr, http.StatusOK, payload, headers)
+	if err != nil {
+		t.Errorf("failed to write json file : %v", err)
+	}
+}
+
+func TestTools_Error(t *testing.T) {
+	var testTools Tools
+
+	rr := httptest.NewRecorder()
+
+	err := testTools.ErrorJSON(rr, errors.New("some error"), http.StatusServiceUnavailable)
+	if err != nil {
+		t.Error(err)
+	}
+
+	var payload JSONResponse
+	decoder := json.NewDecoder(rr.Body)
+	err = decoder.Decode(&payload)
+
+	if err != nil {
+		t.Error("received error decoding json")
+	}
+
+	if !payload.Error {
+		t.Error("payload error should be true")
+	}
+
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Errorf("wrong status code : expected %d got %d", http.StatusServiceUnavailable, rr.Code)
 	}
 
 }
